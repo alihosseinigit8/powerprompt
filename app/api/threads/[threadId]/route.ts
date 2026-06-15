@@ -71,12 +71,34 @@ export async function POST(req: Request, { params }: { params: Promise<{ threadI
   }
 
   const userMessage = createMessage('user', messageText);
+  const appliedInstructions = getAppliedInstructions(payload.modifiers);
   const assistantResult = await buildAssistantReply(
     [...thread.messages, userMessage].map((message) => ({ role: message.role, content: message.text })),
     payload.modifiers,
-  );
+  ).catch((error: unknown) => {
+    const safeError = getSafeErrorMessage(error);
+
+    console.error('[PowerPrompt] OpenAI request failed', {
+      threadId,
+      controls: appliedInstructions.map((instruction) => instruction.label),
+      error: safeError,
+    });
+
+    return undefined;
+  });
+
+  if (!assistantResult) {
+    return Response.json(
+      {
+        error: 'The configured AI provider could not be reached. Check the server terminal for [PowerPrompt] OpenAI request failed.',
+        provider: 'openai_error',
+        appliedInstructions,
+      },
+      { status: 502 },
+    );
+  }
+
   const assistantMessage = createMessage('assistant', assistantResult.text);
-  const appliedInstructions = getAppliedInstructions(payload.modifiers);
 
   console.info('[PowerPrompt] AI request completed', {
     threadId,
@@ -116,20 +138,28 @@ async function buildAssistantReply(
   const latestMessage = messages.at(-1)?.content ?? '';
   const system = buildSystemPrompt(modifiers);
 
-  if (process.env.OPENAI_API_KEY) {
-    try {
-      const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const result = await generateText({
-        model: openai('gpt-4o'),
-        system,
-        messages,
-      });
-
-      return { provider: 'openai', text: result.text };
-    } catch {
-      return { provider: 'fallback', text: buildFallbackReply(latestMessage, modifiers) };
-    }
+  if (!process.env.OPENAI_API_KEY) {
+    return { provider: 'fallback', text: buildFallbackReply(latestMessage, modifiers) };
   }
 
-  return { provider: 'fallback', text: buildFallbackReply(latestMessage, modifiers) };
+  const openai = createOpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: process.env.OPENAI_BASE_URL ?? 'https://api.gapgpt.app/v1',
+  });
+  const provider = (process.env.OPENAI_BASE_URL ?? 'https://api.gapgpt.app/v1').includes('gapgpt') ? 'gapgpt' : 'openai';
+  const result = await generateText({
+    model: openai(process.env.OPENAI_MODEL ?? 'gpt-4o'),
+    system,
+    messages,
+  });
+
+  return { provider, text: result.text };
+}
+
+function getSafeErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return 'Unknown AI provider error';
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 
 type ThemeMode = 'light' | 'dark';
 type Plan = 'Starter' | 'Pro' | 'Team';
@@ -211,7 +211,7 @@ export default function ChatApp() {
         thread: Thread;
         messages: ChatMessage[];
         appliedInstructions: AppliedInstruction[];
-        provider: 'openai' | 'fallback';
+        provider: 'gapgpt' | 'openai' | 'fallback';
         usage: Pick<UserProfile, 'messageLimit' | 'messagesUsed'>;
       };
 
@@ -413,7 +413,7 @@ export default function ChatApp() {
                                 : 'bg-white text-slate-800'
                           }`}
                         >
-                          {message.text}
+                          {message.role === 'assistant' ? <MarkdownMessage text={message.text} /> : message.text}
                         </div>
                         {message.role === 'user' && <Avatar initials={user.avatarInitials} compact />}
                       </div>
@@ -437,7 +437,7 @@ export default function ChatApp() {
                     {lastAppliedInstructions.length > 0 && (
                       <div className="mt-2 text-violet-200">
                         Last sent to AI: {lastAppliedInstructions.map((instruction) => instruction.label).join(', ')} · Provider:{' '}
-                        {lastProvider === 'openai' ? 'OpenAI API' : 'local fallback'}
+                        {getProviderLabel(lastProvider)}
                       </div>
                     )}
                   </div>
@@ -508,6 +508,103 @@ function getActiveControlDescriptions(modifiers: Record<keyof typeof modifierLab
   return Object.entries(modifiers).map(([category, value]) => {
     const descriptionGroup = modifierDescriptions[category as keyof typeof modifierDescriptions];
     return descriptionGroup[value] ?? '';
+  });
+}
+
+function getProviderLabel(provider: string) {
+  if (provider === 'gapgpt') {
+    return 'GapGPT API';
+  }
+
+  if (provider === 'openai') {
+    return 'OpenAI API';
+  }
+
+  return 'local fallback';
+}
+
+function MarkdownMessage({ text }: { text: string }) {
+  const lines = normalizeMarkdown(text).split('\n');
+  const elements: ReactNode[] = [];
+  let listItems: string[] = [];
+
+  function flushList() {
+    if (listItems.length === 0) {
+      return;
+    }
+
+    elements.push(
+      <ul key={`list-${elements.length}`} className="my-3 list-disc space-y-1 pl-5">
+        {listItems.map((item, index) => (
+          <li key={`${item}-${index}`}>{formatInlineMarkdown(item)}</li>
+        ))}
+      </ul>,
+    );
+    listItems = [];
+  }
+
+  lines.forEach((line, index) => {
+    const trimmedLine = line.trim();
+
+    if (!trimmedLine) {
+      flushList();
+      return;
+    }
+
+    const headingMatch = /^(#{1,3})\s+(.+)$/.exec(trimmedLine);
+    if (headingMatch) {
+      flushList();
+      const Tag = headingMatch[1].length === 1 ? 'h2' : headingMatch[1].length === 2 ? 'h3' : 'h4';
+      elements.push(
+        <Tag key={`heading-${index}`} className="mt-4 mb-2 font-bold leading-6 first:mt-0">
+          {formatInlineMarkdown(headingMatch[2])}
+        </Tag>,
+      );
+      return;
+    }
+
+    const bulletMatch = /^[-*]\s+(.+)$/.exec(trimmedLine);
+    if (bulletMatch) {
+      listItems.push(bulletMatch[1]);
+      return;
+    }
+
+    const numberedMatch = /^\d+\.\s+(.+)$/.exec(trimmedLine);
+    if (numberedMatch) {
+      listItems.push(numberedMatch[1]);
+      return;
+    }
+
+    flushList();
+    elements.push(
+      <p key={`paragraph-${index}`} className="my-2 first:mt-0 last:mb-0">
+        {formatInlineMarkdown(trimmedLine)}
+      </p>,
+    );
+  });
+
+  flushList();
+
+  return <div className="space-y-1">{elements}</div>;
+}
+
+function normalizeMarkdown(text: string) {
+  return text
+    .replace(/\s+(#{1,3}\s+)/g, '\n\n$1')
+    .replace(/\s+(\d+\.\s+\*\*)/g, '\n$1')
+    .replace(/\s+(-\s+\*\*)/g, '\n$1')
+    .replace(/\s+(If you want,)/g, '\n\n$1');
+}
+
+function formatInlineMarkdown(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>;
+    }
+
+    return part;
   });
 }
 

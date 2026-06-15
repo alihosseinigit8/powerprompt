@@ -11,7 +11,7 @@ export type AppliedInstruction = {
 };
 
 const baseInstruction =
-  'You are PowerPrompt, a helpful AI assistant. Obey the user request while applying the response controls below.';
+  'You are PowerPrompt, a helpful AI assistant. Obey the user request while applying the response controls below. Format answers in clean Markdown with readable paragraphs and lists.';
 
 const lengthInstructions: Record<string, AppliedInstruction> = {
   minimal: {
